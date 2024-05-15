@@ -11,6 +11,7 @@ struct Map {
     minerals: Vec<(usize, usize)>, // positions des gisements de minerais
     base: (usize, usize), // position de la base
     water: Vec<(usize, usize)>, // positions des zones d'eau
+    explored: Vec<Vec<bool>>,
 }
 
 // Structure représentant un robot
@@ -26,6 +27,7 @@ struct Robot {
 enum Task {
     CollectEnergy,
     CollectMinerals,
+    Explore,
 }
 
 impl Robot {
@@ -39,7 +41,8 @@ impl Robot {
         }
     }
 
-    fn move_towards(&mut self, target: (usize, usize), map: &Map) {
+    fn move_towards(&mut self, target: (usize, usize), map: &mut Map) {
+        map.explored[self.y][self.x] = true;
         if map.water.contains(&target) {
             return; // Ne pas se déplacer si la case cible est de l'eau
         }
@@ -61,17 +64,20 @@ impl Robot {
 
 fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
     let mut buffer: Vec<u32> = vec![0; map.width * map.height];
-    // Dessiner les obstacles
     for y in 0..map.height {
         for x in 0..map.width {
             let index = y * map.width + x;
-            buffer[index] = if map.obstacles[y][x] {
-                0xFF_000000 // noir pour les obstacles
-            } else if map.water.contains(&(x, y)) {
-                0xFF_0000FF // bleu pour les zones d'eau
+            if map.explored[y][x] {
+                buffer[index] = if map.obstacles[y][x] {
+                    0xFF_000000 // noir pour les obstacles
+                } else if map.water.contains(&(x, y)) {
+                    0xFF_0000FF // bleu pour les zones d'eau
+                } else {
+                    0xFFFFFFFF // blanc pour le sol exploré
+                };
             } else {
-                0xFFFFFFFF // blanc pour le sol
-            };
+                buffer[index] = 0xFF_AAAAAA; // Gris pour les cases non explorées
+            }
         }
     }
     // Dessiner les ressources
@@ -83,18 +89,20 @@ fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
         let index = y * map.width + x;
         buffer[index] = 0xFFFF0000; // rouge pour les minerais
     }
-    // Dessiner la base
-    let (bx, by) = map.base;
-    let index = by * map.width + bx;
-    buffer[index] = 0xFF_00FFFF; // cyan pour la base
+
     // Dessiner les robots
     for robot in robots {
         let index = robot.y * map.width + robot.x;
         buffer[index] = match robot.task {
             Task::CollectEnergy => 0xFF_FF00FF, // violet pour les robots qui collectent de l'énergie
             Task::CollectMinerals => 0xFFFF00FF, // rose pour les robots qui collectent des minerais
+            Task::Explore => 0xFF_FFFF00, // Jaune pour le robot d'exploration
         };
     }
+     // Dessiner la base en dernier
+ let (bx, by) = map.base;
+ let index_base = by * map.width + bx;
+ buffer[index_base] = 0xFF_00FFFF; // cyan pour la base
     // Afficher le contenu du buffer
     window.update_with_buffer(&buffer, map.width, map.height).unwrap();
 }
@@ -114,7 +122,17 @@ fn main() {
         minerals: vec![],
         base: (width / 2, height / 2), // base au centre de la carte
         water: vec![],
+        explored: vec![vec![false; width]; height],
     };
+    // Définir la taille de la zone explorée autour de la base (15%)
+        let exploration_radius = (width * height) / 100 * 20;
+
+        // Exploration autour de la base
+        for y in (map.base.1).saturating_sub(exploration_radius / width)..=(map.base.1 + exploration_radius / width).min(height - 1) {
+            for x in (map.base.0).saturating_sub(exploration_radius % width)..=(map.base.0 + exploration_radius % width).min(width - 1) {
+                map.explored[y][x] = true;
+            }
+        }
 
     // Placement aléatoire des obstacles sur les bords de la carte
     for i in 0..width {
@@ -125,6 +143,7 @@ fn main() {
         map.obstacles[i][0] = true;
         map.obstacles[i][width - 1] = true;
     }
+   
 
     // Placement aléatoire de l'énergie (hors des zones d'eau)
     for _ in 0..10 {
@@ -172,6 +191,11 @@ fn main() {
         let x = map.base.0;
         let y = map.base.1;
         robots.push(Robot::new(x, y, Task::CollectMinerals));
+    }
+    for _ in 0..1 { // Un seul robot pour l'exploration
+        let x = map.base.0;
+        let y = map.base.1;
+        robots.push(Robot::new(x, y, Task::Explore));
     }
 
     // Création de la fenêtre de visualisation
@@ -227,7 +251,7 @@ fn main() {
                           if let Some(&(ex, ey)) = map.energy.iter().min_by_key(|&&(ex, ey)| {
                               ((robot.x as isize - ex as isize).abs() + (robot.y as isize - ey as isize).abs()) as usize
                           }) {
-                              robot.move_towards((ex, ey), &map);
+                              robot.move_towards((ex, ey), &mut map);
                           }
                       }
                   }
@@ -240,10 +264,37 @@ fn main() {
                           if let Some(&(mx, my)) = map.minerals.iter().min_by_key(|&&(mx, my)| {
                               ((robot.x as isize - mx as isize).abs() + (robot.y as isize - my as isize).abs()) as usize
                           }) {
-                              robot.move_towards((mx, my), &map);
+                              robot.move_towards((mx, my), &mut map);
                           }
                       }
                   }
+                  Task::Explore => {
+                    // Mise à jour de l'exploration lors du déplacement
+                    map.explored[robot.y][robot.x] = true;
+                
+                    // Déplacement vers une case non explorée
+                    let mut target = (robot.x, robot.y);
+                    let mut min_distance = isize::MAX;
+                
+                    // Recherche de la case non explorée la plus proche
+                    for y in 0..map.height {
+                        for x in 0..map.width {
+                            if !map.explored[y][x] && !map.obstacles[y][x] {
+                                let distance = (robot.x as isize - x as isize).abs() + (robot.y as isize - y as isize).abs();
+                                if distance < min_distance {
+                                    min_distance = distance;
+                                    target = (x, y);
+                                }
+                            }
+                        }
+                    }
+                
+                    // Déplacement vers la case non explorée la plus proche
+                    robot.move_towards(target, &mut map);
+                }
+                
+                
+                
               }
           }
         }
