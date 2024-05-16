@@ -1,7 +1,8 @@
-use minifb::{Key, Window, WindowOptions};
+use minifb::{Window, WindowOptions};
 use noise::{NoiseFn, Perlin};
-use rand::Rng;
 use std::{thread, time};
+use std::time::{SystemTime, UNIX_EPOCH};
+use rand::Rng;
 
 // Structure représentant la carte
 struct Map {
@@ -11,7 +12,6 @@ struct Map {
     energy: Vec<(usize, usize)>, // positions des sources d'énergie
     minerals: Vec<(usize, usize)>, // positions des gisements de minerais
     base: (usize, usize), // position de la base
-    water: Vec<(usize, usize)>, // positions des zones d'eau
     explored: Vec<Vec<bool>>,
 }
 
@@ -44,10 +44,7 @@ impl Robot {
         }
     }
 
-    fn move_towards(&mut self, target: (usize, usize), map: &mut Map) {
-        // Mettre à jour la carte explorée
-        let current_pos = (self.x, self.y);
-    
+    fn move_towards(&mut self, target: (usize, usize)) {
         // Calculer les déplacements nécessaires pour se rapprocher de la cible
         let dx = if self.x < target.0 { 1 } else if self.x > target.0 { -1 } else { 0 };
         let dy = if self.y < target.1 { 1 } else if self.y > target.1 { -1 } else { 0 };
@@ -56,25 +53,9 @@ impl Robot {
         let new_x = (self.x as isize).wrapping_add(dx as isize) as usize;
         let new_y = (self.y as isize).wrapping_add(dy as isize) as usize;
     
-        // Vérifier si la nouvelle position est valide et si elle n'est pas un obstacle
-        if new_x < map.width && new_y < map.height && !map.obstacles[new_y][new_x] {
-            // Déplacer le robot directement
-            self.x = new_x;
-            self.y = new_y;
-        }
-    
-        // Mettre à jour les cases environnantes comme explorées
-        for dy in -1..=1 {
-            for dx in -1..=1 {
-                let x = (self.x as isize).wrapping_add(dx);
-                let y = (self.y as isize).wrapping_add(dy);
-                if x >= 0 && x < map.width as isize && y >= 0 && y < map.height as isize {
-                    map.explored[y as usize][x as usize] = true;
-                }
-            }
-        }
-        println!("New Position: ({}, {})", new_x, new_y);
-        println!("Validity Check: {}", new_x < map.width && new_y < map.height && !map.obstacles[new_y][new_x]);
+        // Déplacer le robot directement
+        self.x = new_x;
+        self.y = new_y;
     }
 }
 
@@ -83,11 +64,14 @@ fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
     for y in 0..map.height {
         for x in 0..map.width {
             let index = y * map.width + x;
-            if map.explored[y][x] {
+            if (x == map.base.0 && y >= map.base.1.saturating_sub(1) && y <= map.base.1.saturating_add(1))
+                || (y == map.base.1 && x >= map.base.0.saturating_sub(1) && x <= map.base.0.saturating_add(1))
+            {
+                // Dessiner une croix pour la base
+                buffer[index] = 0xFF_00FFFF; // cyan pour la base
+            } else if map.explored[y][x] {
                 if map.obstacles[y][x] {
                     buffer[index] = 0xFF_000000; // noir pour les obstacles
-                } else if map.water.contains(&(x, y)) {
-                    buffer[index] = 0xFF_0000FF; // bleu pour les zones d'eau
                 } else if map.energy.contains(&(x, y)) || map.minerals.contains(&(x, y)) {
                     if !map.explored[y][x] {
                         buffer[index] = 0xFF_AAAAAA; // Gris pour les ressources cachées sous le brouillard
@@ -98,13 +82,8 @@ fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
                             0xFFFF0000 // rouge pour les minerais
                         };
                     }
-                } else if (x == map.base.0 && y >= map.base.1.saturating_sub(1) && y <= map.base.1.saturating_add(1))
-                    || (y == map.base.1 && x >= map.base.0.saturating_sub(1) && x <= map.base.0.saturating_add(1))
-                {
-                    // Dessiner une croix pour la base
-                    buffer[index] = 0xFF_00FFFF; // cyan pour la base
                 } else {
-                    buffer[index] = 0xFFFFFFFF; // blanc pour le sol exploré
+                    buffer[index] = 0xFF_FFFFFF; // blanc pour le sol exploré
                 }
             } else {
                 buffer[index] = 0xFF_AAAAAA; // Gris pour les cases non explorées
@@ -144,80 +123,41 @@ fn explore_map(robot: &mut Robot, map: &mut Map) {
         }
     }
 
-    // Déplacement vers la case non explorée la plus proche
-    robot.move_towards(target, map);
-
-    println!("Target Position: {:?}", target);
-    println!("Minimum Distance: {}", min_distance);
-}
-
-fn generate_height_map(width: usize, height: usize) -> Vec<Vec<f64>> {
-    let mut rng = rand::thread_rng();
-    let perlin = Perlin::new(0);
-    let mut height_map = vec![vec![0.0; width]; height];
-
-    for y in 0..height {
-        for x in 0..width {
-            let x_normalized = x as f64 / width as f64;
-            let y_normalized = y as f64 / height as f64;
-            let value = perlin.get([x_normalized, y_normalized, 0.0]) + rng.gen_range(-0.1..0.1); // Ajout de bruit aléatoire
-            height_map[y][x] = value;
-        }
-    }
-
-    height_map
-}
-
-fn generate_obstacles(height_map: &Vec<Vec<f64>>, threshold: f64) -> Vec<Vec<bool>> {
-    let mut obstacles = vec![vec![false; height_map[0].len()]; height_map.len()];
-
-    for y in 0..height_map.len() {
-        for x in 0..height_map[y].len() {
-            if height_map[y][x] > threshold {
-                obstacles[y][x] = true;
+    // Mettre à jour la zone découverte autour du robot
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            let x = (robot.x as isize + dx) as usize;
+            let y = (robot.y as isize + dy) as usize;
+            if x < map.width && y < map.height {
+                map.explored[y][x] = true;
             }
         }
     }
 
-    obstacles
+    // Déplacement vers la case non explorée la plus proche
+    robot.move_towards(target);
+}
+
+// Fonction pour calculer la densité de brouillard dans une case donnée
+fn calculate_fog_density(position: (usize, usize), map: &Map) -> f64 {
+    let mut fog_density: f64 = 1.0; // Spécifier le type f64 pour fog_density
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            let x = position.0 as isize + dx;
+            let y = position.1 as isize + dy;
+            if x >= 0 && x < map.width as isize && y >= 0 && y < map.height as isize {
+                if !map.explored[y as usize][x as usize] {
+                    fog_density -= 0.2; // Réduire la densité de brouillard pour les cases non explorées
+                }
+            }
+        }
+    }
+    fog_density.max(0.0) as f64 // Utiliser max(0.0) pour garantir que la valeur est positive
 }
 
 fn main() {
-    let mut rng = rand::thread_rng();
-
     let width = 35;
     let height = 35;
-
-    // Génération de la carte de hauteur
-    let height_map = generate_height_map(width, height);
-    // Génération des obstacles à partir de la carte de hauteur
-    let obstacles = generate_obstacles(&height_map, 0.5); // Ajustez le seuil au besoin
-
-    // Initialisation de la carte avec des obstacles, de l'énergie, des minerais, une base et des zones d'eau
-    let mut map = Map {
-        width,
-        height,
-        obstacles,
-        energy: vec![],
-        minerals: vec![],
-        base: (width / 2, height / 2), // base au centre de la carte
-        water: vec![],
-        explored: vec![vec![false; width]; height],
-    };
-
-    // Placement aléatoire des zones d'eau
-    for _ in 0..5 {
-        let x = rng.gen_range(1..width - 1);
-        let y = rng.gen_range(1..height - 1);
-        map.water.push((x, y));
-    }
-
-    // Création des robots
-    let mut robots = Vec::new();
-    // Garder uniquement le robot explorateur
-    let x = map.base.0;
-    let y = map.base.1;
-    robots.push(Robot::new(x, y, Task::Explore));
 
     // Création de la fenêtre de visualisation
     let mut window = Window::new(
@@ -230,24 +170,93 @@ fn main() {
         panic!("{}", e);
     });
 
+    // Initialisation de la carte avec des obstacles, de l'énergie, des minerais, une base et des zones d'eau
+    let mut map = generate_map(width, height);
+
+    // Création des robots
+    let mut robots = Vec::new();
+    // Garder uniquement le robot explorateur
+    let x = map.base.0;
+    let y = map.base.1;
+    robots.push(Robot::new(x, y, Task::Explore));
+
     // Boucle principale de simulation
     while window.is_open() {
         // Déplacements des robots
         for robot in &mut robots {
-            // Si le robot n'est pas sur un obstacle
-            if !map.obstacles[robot.y][robot.x] {
-                match robot.task {
-                    Task::Explore => {
-                        // Exploration de la carte
-                        explore_map(robot, &mut map);
-                    }
-                    _ => {} // Ignorer les autres tâches
+            match robot.task {
+                Task::Explore => {
+                    // Exploration de la carte
+                    explore_map(robot, &mut map);
                 }
+                _ => {} // Ignorer les autres tâches
             }
         }
         // Dessiner la carte avec les robots
         draw_map(&mut window, &map, &robots);
         // Pause pour contrôler la vitesse de rafraîchissement
-        thread::sleep(time::Duration::from_millis(100));
+        thread::sleep(time::Duration::from_millis(50));
     }
+}
+
+fn generate_map(width: usize, height: usize) -> Map {
+    let mut map = Map {
+        width,
+        height,
+        obstacles: vec![vec![false; width]; height],
+        energy: vec![],
+        minerals: vec![],
+        base: (width / 2, height / 2), // base au centre de la carte
+        explored: vec![vec![false; width]; height],
+    };
+
+    let mut rng = rand::thread_rng();
+
+    // Obtenez le timestamp actuel en secondes depuis l'époque UNIX
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let perlin = Perlin::new(seed as u32);
+
+    // Générer la carte de hauteur et les obstacles
+    for y in 0..height {
+        for x in 0..width {
+            let value = perlin.get([x as f64 / 10.0, y as f64 / 10.0, 0.0]);
+            if value > 0.5 {
+                map.obstacles[y][x] = true;
+            }
+        }
+    }
+
+    // Placement aléatoire de l'énergie (non sur la base)
+    for _ in 0..10 {
+        let mut x;
+        let mut y;
+        loop {
+            x = rng.gen_range(0..width);
+            y = rng.gen_range(0..height);
+            if (x, y) != map.base {
+                break;
+            }
+        }
+        map.energy.push((x, y));
+    }
+
+    // Placement aléatoire des minerais (non sur la base)
+    for _ in 0..10 {
+        let mut x;
+        let mut y;
+        loop {
+            x = rng.gen_range(0..width);
+            y = rng.gen_range(0..height);
+            if (x, y) != map.base {
+                break;
+            }
+        }
+        map.minerals.push((x, y));
+    }
+
+    map
 }
