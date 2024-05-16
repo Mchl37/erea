@@ -1,4 +1,5 @@
 use minifb::{Key, Window, WindowOptions};
+use noise::{NoiseFn, Perlin};
 use rand::Rng;
 use std::{thread, time};
 
@@ -72,6 +73,8 @@ impl Robot {
                 }
             }
         }
+        println!("New Position: ({}, {})", new_x, new_y);
+        println!("Validity Check: {}", new_x < map.width && new_y < map.height && !map.obstacles[new_y][new_x]);
     }
 }
 
@@ -143,6 +146,40 @@ fn explore_map(robot: &mut Robot, map: &mut Map) {
 
     // Déplacement vers la case non explorée la plus proche
     robot.move_towards(target, map);
+
+    println!("Target Position: {:?}", target);
+    println!("Minimum Distance: {}", min_distance);
+}
+
+fn generate_height_map(width: usize, height: usize) -> Vec<Vec<f64>> {
+    let mut rng = rand::thread_rng();
+    let perlin = Perlin::new(0);
+    let mut height_map = vec![vec![0.0; width]; height];
+
+    for y in 0..height {
+        for x in 0..width {
+            let x_normalized = x as f64 / width as f64;
+            let y_normalized = y as f64 / height as f64;
+            let value = perlin.get([x_normalized, y_normalized, 0.0]) + rng.gen_range(-0.1..0.1); // Ajout de bruit aléatoire
+            height_map[y][x] = value;
+        }
+    }
+
+    height_map
+}
+
+fn generate_obstacles(height_map: &Vec<Vec<f64>>, threshold: f64) -> Vec<Vec<bool>> {
+    let mut obstacles = vec![vec![false; height_map[0].len()]; height_map.len()];
+
+    for y in 0..height_map.len() {
+        for x in 0..height_map[y].len() {
+            if height_map[y][x] > threshold {
+                obstacles[y][x] = true;
+            }
+        }
+    }
+
+    obstacles
 }
 
 fn main() {
@@ -151,55 +188,22 @@ fn main() {
     let width = 35;
     let height = 35;
 
+    // Génération de la carte de hauteur
+    let height_map = generate_height_map(width, height);
+    // Génération des obstacles à partir de la carte de hauteur
+    let obstacles = generate_obstacles(&height_map, 0.5); // Ajustez le seuil au besoin
+
     // Initialisation de la carte avec des obstacles, de l'énergie, des minerais, une base et des zones d'eau
     let mut map = Map {
         width,
         height,
-        obstacles: vec![vec![false; width]; height],
+        obstacles,
         energy: vec![],
         minerals: vec![],
         base: (width / 2, height / 2), // base au centre de la carte
         water: vec![],
         explored: vec![vec![false; width]; height],
     };
-
-    // Placement aléatoire des obstacles sur les bords de la carte
-    for i in 0..width {
-        map.obstacles[0][i] = true;
-        map.obstacles[height - 1][i] = true;
-    }
-    for i in 0..height {
-        map.obstacles[i][0] = true;
-        map.obstacles[i][width - 1] = true;
-    }
-
-    // Placement aléatoire de l'énergie (hors des zones d'eau et non sur la base)
-    for _ in 0..10 {
-        let mut x;
-        let mut y;
-        loop {
-            x = rng.gen_range(1..width - 1);
-            y = rng.gen_range(1..height - 1);
-            if !map.water.contains(&(x, y)) && (x, y) != map.base {
-                break;
-            }
-        }
-        map.energy.push((x, y));
-    }
-
-    // Placement aléatoire des minerais (hors des zones d'eau et non sur la base)
-    for _ in 0..10 {
-        let mut x;
-        let mut y;
-        loop {
-            x = rng.gen_range(1..width - 1);
-            y = rng.gen_range(1..height - 1);
-            if !map.water.contains(&(x, y)) && (x, y) != map.base {
-                break;
-            }
-        }
-        map.minerals.push((x, y));
-    }
 
     // Placement aléatoire des zones d'eau
     for _ in 0..5 {
