@@ -1,8 +1,8 @@
 use minifb::{Window, WindowOptions};
 use noise::{NoiseFn, Perlin};
+use rand::Rng;
 use std::{thread, time};
 use std::time::{SystemTime, UNIX_EPOCH};
-use rand::Rng;
 
 // Structure représentant la carte
 struct Map {
@@ -22,6 +22,7 @@ struct Robot {
     energy: usize,
     minerals: usize,
     task: Task,
+    state: RobotState,
 }
 
 // Enumération des tâches des robots
@@ -30,6 +31,12 @@ enum Task {
     CollectEnergy,
     CollectMinerals,
     Explore,
+}
+
+enum RobotState {
+    Exploring,
+    Returning,
+    Collecting,
 }
 
 impl Robot {
@@ -41,19 +48,15 @@ impl Robot {
             energy: 0,
             minerals: 0,
             task,
+            state: RobotState::Exploring,
         }
     }
 
     fn move_towards(&mut self, target: (usize, usize)) {
-        // Calculer les déplacements nécessaires pour se rapprocher de la cible
         let dx = if self.x < target.0 { 1 } else if self.x > target.0 { -1 } else { 0 };
         let dy = if self.y < target.1 { 1 } else if self.y > target.1 { -1 } else { 0 };
-    
-        // Calculer la nouvelle position potentielle
         let new_x = (self.x as isize).wrapping_add(dx as isize) as usize;
         let new_y = (self.y as isize).wrapping_add(dy as isize) as usize;
-    
-        // Déplacer le robot directement
         self.x = new_x;
         self.y = new_y;
     }
@@ -67,50 +70,45 @@ fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
             if (x == map.base.0 && y >= map.base.1.saturating_sub(1) && y <= map.base.1.saturating_add(1))
                 || (y == map.base.1 && x >= map.base.0.saturating_sub(1) && x <= map.base.0.saturating_add(1))
             {
-                // Dessiner une croix pour la base
-                buffer[index] = 0xFF_00FFFF; // cyan pour la base
+                buffer[index] = 0xFF_00FFFF;
             } else if map.explored[y][x] {
                 if map.obstacles[y][x] {
-                    buffer[index] = 0xFF_000000; // noir pour les obstacles
+                    buffer[index] = 0xFF_000000;
                 } else if map.energy.contains(&(x, y)) || map.minerals.contains(&(x, y)) {
                     if !map.explored[y][x] {
-                        buffer[index] = 0xFF_AAAAAA; // Gris pour les ressources cachées sous le brouillard
+                        buffer[index] = 0xFF_AAAAAA;
                     } else {
                         buffer[index] = if map.energy.contains(&(x, y)) {
-                            0xFF_00FF00 // vert pour l'énergie
+                            0xFF_00FF00
                         } else {
-                            0xFFFF0000 // rouge pour les minerais
+                            0xFFFF0000
                         };
                     }
                 } else {
-                    buffer[index] = 0xFF_FFFFFF; // blanc pour le sol exploré
+                    buffer[index] = 0xFF_FFFFFF;
                 }
             } else {
-                buffer[index] = 0xFF_AAAAAA; // Gris pour les cases non explorées
+                buffer[index] = 0xFF_AAAAAA;
             }
         }
     }
 
-    // Dessiner les robots
     for robot in robots {
         let index = robot.y * map.width + robot.x;
         buffer[index] = match robot.task {
-            Task::CollectEnergy => 0xFF_FF00FF, // violet pour les robots qui collectent de l'énergie
-            Task::CollectMinerals => 0xFFFF00FF, // rose pour les robots qui collectent des minerais
-            Task::Explore => 0xFF_FFFF00, // Jaune pour le robot d'exploration
+            Task::CollectEnergy => 0xFF_FF00FF,
+            Task::CollectMinerals => 0xFFFF00FF,
+            Task::Explore => 0xFF_FFFF00,
         };
     }
 
-    // Afficher le contenu du buffer
     window.update_with_buffer(&buffer, map.width, map.height).unwrap();
 }
 
 fn explore_map(robot: &mut Robot, map: &mut Map) {
-    // Recherche de la case non explorée la plus proche, y compris celles recouvertes de brouillard
     let mut target = (robot.x, robot.y);
     let mut min_distance = isize::MAX;
 
-    // Recherche parmi toutes les cases de la carte
     for y in 0..map.height {
         for x in 0..map.width {
             if !map.explored[y][x] {
@@ -123,7 +121,6 @@ fn explore_map(robot: &mut Robot, map: &mut Map) {
         }
     }
 
-    // Mettre à jour la zone découverte autour du robot
     for dy in -1..=1 {
         for dx in -1..=1 {
             let x = (robot.x as isize + dx) as usize;
@@ -134,32 +131,58 @@ fn explore_map(robot: &mut Robot, map: &mut Map) {
         }
     }
 
-    // Déplacement vers la case non explorée la plus proche
     robot.move_towards(target);
 }
 
-// Fonction pour calculer la densité de brouillard dans une case donnée
-fn calculate_fog_density(position: (usize, usize), map: &Map) -> f64 {
-    let mut fog_density: f64 = 1.0; // Spécifier le type f64 pour fog_density
-    for dy in -1..=1 {
-        for dx in -1..=1 {
-            let x = position.0 as isize + dx;
-            let y = position.1 as isize + dy;
-            if x >= 0 && x < map.width as isize && y >= 0 && y < map.height as isize {
-                if !map.explored[y as usize][x as usize] {
-                    fog_density -= 0.2; // Réduire la densité de brouillard pour les cases non explorées
+fn collect_resources(robot: &mut Robot, map: &mut Map) {
+    match robot.task {
+        Task::CollectEnergy => {
+            if let Some(target) = map.energy.iter().min_by_key(|&&(x, y)| {
+                ((robot.x as isize - x as isize).abs() + (robot.y as isize - y as isize).abs()) as isize
+            }).cloned() {
+                if (robot.x, robot.y) == target {
+                    robot.energy += 1;
+                    map.energy.retain(|&pos| pos != target);
+                    robot.state = RobotState::Returning;
+                } else {
+                    robot.move_towards(target);
                 }
+            } else {
+                robot.state = RobotState::Returning;
             }
         }
+        Task::CollectMinerals => {
+            if let Some(target) = map.minerals.iter().min_by_key(|&&(x, y)| {
+                ((robot.x as isize - x as isize).abs() + (robot.y as isize - y as isize).abs()) as isize
+            }).cloned() {
+                if (robot.x, robot.y) == target {
+                    robot.minerals += 1;
+                    map.minerals.retain(|&pos| pos != target);
+                    robot.state = RobotState::Returning;
+                } else {
+                    robot.move_towards(target);
+                }
+            } else {
+                robot.state = RobotState::Returning;
+            }
+        }
+        _ => {}
     }
-    fog_density.max(0.0) as f64 // Utiliser max(0.0) pour garantir que la valeur est positive
+}
+
+fn is_map_fully_explored(map: &Map) -> bool {
+    for row in &map.explored {
+        if row.contains(&false) {
+            return false;
+        }
+    }
+    true
 }
 
 fn main() {
     let width = 35;
     let height = 35;
 
-    // Création de la fenêtre de visualisation
     let mut window = Window::new(
         "Rust Game",
         width * 20,
@@ -170,31 +193,51 @@ fn main() {
         panic!("{}", e);
     });
 
-    // Initialisation de la carte avec des obstacles, de l'énergie, des minerais, une base et des zones d'eau
     let mut map = generate_map(width, height);
 
-    // Création des robots
     let mut robots = Vec::new();
-    // Garder uniquement le robot explorateur
     let x = map.base.0;
     let y = map.base.1;
     robots.push(Robot::new(x, y, Task::Explore));
+    robots.push(Robot::new(x, y, Task::CollectEnergy));
+    robots.push(Robot::new(x, y, Task::CollectMinerals));
 
-    // Boucle principale de simulation
     while window.is_open() {
-        // Déplacements des robots
+        let mut explorer_returned = false;
+
         for robot in &mut robots {
-            match robot.task {
-                Task::Explore => {
-                    // Exploration de la carte
-                    explore_map(robot, &mut map);
+            match robot.state {
+                RobotState::Exploring => {
+                    if is_map_fully_explored(&map) {
+                        robot.state = RobotState::Returning;
+                    } else {
+                        explore_map(robot, &mut map);
+                    }
                 }
-                _ => {} // Ignorer les autres tâches
+                RobotState::Returning => {
+                    robot.move_towards(map.base);
+                    if (robot.x, robot.y) == map.base {
+                        if robot.task == Task::Explore {
+                            explorer_returned = true;
+                        }
+                        robot.state = RobotState::Collecting;
+                    }
+                }
+                RobotState::Collecting => {
+                    collect_resources(robot, &mut map);
+                }
             }
         }
-        // Dessiner la carte avec les robots
+
+        if explorer_returned {
+            for robot in &mut robots {
+                if robot.task != Task::Explore {
+                    robot.state = RobotState::Collecting;
+                }
+            }
+        }
+
         draw_map(&mut window, &map, &robots);
-        // Pause pour contrôler la vitesse de rafraîchissement
         thread::sleep(time::Duration::from_millis(50));
     }
 }
@@ -206,13 +249,11 @@ fn generate_map(width: usize, height: usize) -> Map {
         obstacles: vec![vec![false; width]; height],
         energy: vec![],
         minerals: vec![],
-        base: (width / 2, height / 2), // base au centre de la carte
+        base: (width / 2, height / 2),
         explored: vec![vec![false; width]; height],
     };
 
     let mut rng = rand::thread_rng();
-
-    // Obtenez le timestamp actuel en secondes depuis l'époque UNIX
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -220,7 +261,6 @@ fn generate_map(width: usize, height: usize) -> Map {
 
     let perlin = Perlin::new(seed as u32);
 
-    // Générer la carte de hauteur et les obstacles
     for y in 0..height {
         for x in 0..width {
             let value = perlin.get([x as f64 / 10.0, y as f64 / 10.0, 0.0]);
@@ -230,7 +270,6 @@ fn generate_map(width: usize, height: usize) -> Map {
         }
     }
 
-    // Placement aléatoire de l'énergie (non sur la base)
     for _ in 0..10 {
         let mut x;
         let mut y;
@@ -244,7 +283,6 @@ fn generate_map(width: usize, height: usize) -> Map {
         map.energy.push((x, y));
     }
 
-    // Placement aléatoire des minerais (non sur la base)
     for _ in 0..10 {
         let mut x;
         let mut y;
