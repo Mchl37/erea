@@ -137,6 +137,6 @@ fn test_robot_collects_minerals() {
     let mut robot = Robot::new(5, 5, Task::CollectMinerals);
     collect_resources(&mut robot, &mut map);
     assert_eq!(robot.minerals, 1);
-    // Ajoutez des assertions pour vérifier que le robot collecte correctement les minéraux
+    
 }
 }
