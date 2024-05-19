@@ -1,6 +1,14 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use erea::Map;
+    use erea::Robot;
+    use erea::Task;
+    use std::process::Command;
+    use erea::generate_map;
+    use erea::explore_map;
+    use erea::collect_resources;
+
     #[test]
     fn test_game_start() {
         // Exécute le programme principal
@@ -8,7 +16,7 @@ mod tests {
             .arg("run")
             .output()
             .expect("Failed to execute command");
-
+        
         // Vérifie si l'exécution s'est terminée sans erreur
         assert!(output.status.success());
 
@@ -22,7 +30,7 @@ mod tests {
         let mut robot = Robot::new(5, 5, Task::Explore);
         let initial_explored = map.explored.clone();
 
-
+        
         explore_map(&mut robot, &mut map);
 
         // Vérifie que la carte explorée a changé autour du robot
@@ -34,6 +42,7 @@ mod tests {
             }
         }
     }
+   
 
     #[test]
     fn test_generate_map() {
@@ -85,6 +94,7 @@ mod tests {
         assert_eq!(robot.x, 5);
         assert_eq!(robot.y, 5);
     }
+    
 
     #[test]
         fn test_base_appearance() {
@@ -113,42 +123,20 @@ mod tests {
                 energy: vec![],
                 minerals: vec![(5, 5)], // Ajout d'un minerai à la position (5, 5)
                 base: (5, 5),
-                water: vec![],
+                explored: vec![vec![false; 10]; 10],
             };
-
+    
             // Vérification de la présence du minerai
             assert!(map.minerals.contains(&(5, 5)));
-        }
-
+        } 
+        
         #[test]
-    fn test_collect_minerals() {
-        // Crée une carte avec des minéraux
-        let mut map = Map {
-            width: 10,
-            height: 10,
-            obstacles: vec![vec![false; 10]; 10],
-            energy: vec![],
-            minerals: vec![(5, 5)], // Position d'un minerai
-            base: (5, 5),
-            explored: vec![vec![false; 10]; 10],
-        };
-
-        // Crée un robot avec une tâche de collecte de minéraux
-        let mut robot = Robot::new(5, 5, Task::CollectMinerals);
-
-        // Vérifie que le compteur de minéraux du robot est à 0 au début
-        assert_eq!(robot.minerals, 0);
-
-        robot.move_towards((5, 5), &map);
-
-        // Vérifie que le robot a collecté le minerai
-        if let Some((x, y)) = map.minerals.iter().position(|&(mx, my)| mx == robot.x && my == robot.y) {
-            map.minerals.remove(x);
-            robot.minerals += 1;
-        }
-
-        // Vérifie que le compteur de minéraux du robot a augmenté
-        assert_eq!(robot.minerals, 1);
-    }
+fn test_robot_collects_minerals() {
+    let mut map = generate_map(10, 10);
+    map.minerals.push((5, 6));
+    let mut robot = Robot::new(5, 5, Task::CollectMinerals);
+    collect_resources(&mut robot, &mut map);
+    assert_eq!(robot.minerals, 1);
+    // Ajoutez des assertions pour vérifier que le robot collecte correctement les minéraux
 }
-
+}
