@@ -1,17 +1,17 @@
 use minifb::{Window, WindowOptions};
 use noise::{NoiseFn, Perlin};
 use rand::Rng;
-use std::{thread, time};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{thread, time};
 
 // Structure représentant la carte
 struct Map {
     width: usize,
     height: usize,
-    obstacles: Vec<Vec<bool>>, // true si obstacle, false sinon
-    energy: Vec<(usize, usize)>, // positions des sources d'énergie
+    obstacles: Vec<Vec<bool>>,     // true si obstacle, false sinon
+    energy: Vec<(usize, usize)>,   // positions des sources d'énergie
     minerals: Vec<(usize, usize)>, // positions des gisements de minerais
-    base: (usize, usize), // position de la base
+    base: (usize, usize),          // position de la base
     explored: Vec<Vec<bool>>,
 }
 
@@ -53,8 +53,20 @@ impl Robot {
     }
 
     fn move_towards(&mut self, target: (usize, usize)) {
-        let dx = if self.x < target.0 { 1 } else if self.x > target.0 { -1 } else { 0 };
-        let dy = if self.y < target.1 { 1 } else if self.y > target.1 { -1 } else { 0 };
+        let dx = if self.x < target.0 {
+            1
+        } else if self.x > target.0 {
+            -1
+        } else {
+            0
+        };
+        let dy = if self.y < target.1 {
+            1
+        } else if self.y > target.1 {
+            -1
+        } else {
+            0
+        };
         let new_x = (self.x as isize).wrapping_add(dx as isize) as usize;
         let new_y = (self.y as isize).wrapping_add(dy as isize) as usize;
         self.x = new_x;
@@ -67,8 +79,12 @@ fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
     for y in 0..map.height {
         for x in 0..map.width {
             let index = y * map.width + x;
-            if (x == map.base.0 && y >= map.base.1.saturating_sub(1) && y <= map.base.1.saturating_add(1))
-                || (y == map.base.1 && x >= map.base.0.saturating_sub(1) && x <= map.base.0.saturating_add(1))
+            if (x == map.base.0
+                && y >= map.base.1.saturating_sub(1)
+                && y <= map.base.1.saturating_add(1))
+                || (y == map.base.1
+                    && x >= map.base.0.saturating_sub(1)
+                    && x <= map.base.0.saturating_add(1))
             {
                 buffer[index] = 0xFF_00FFFF;
             } else if map.explored[y][x] {
@@ -95,14 +111,17 @@ fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
 
     for robot in robots {
         let index = robot.y * map.width + robot.x;
-        buffer[index] = match robot.task {
-            Task::CollectEnergy => 0xFF_FF00FF,
-            Task::CollectMinerals => 0xFFFF00FF,
-            Task::Explore => 0xFF_FFFF00,
+        let color = match robot.state {
+            RobotState::Exploring => 0xFF_FFFF00, // Jaune pour l'exploration
+            RobotState::Collecting => 0xFFFF00FF, // Rose pour la collecte
+            RobotState::Returning => 0xFFFF00FF,  // Rose pour le retour à la base
         };
+        buffer[index] = color;
     }
 
-    window.update_with_buffer(&buffer, map.width, map.height).unwrap();
+    window
+        .update_with_buffer(&buffer, map.width, map.height)
+        .unwrap();
 }
 
 fn explore_map(robot: &mut Robot, map: &mut Map) {
@@ -112,7 +131,9 @@ fn explore_map(robot: &mut Robot, map: &mut Map) {
     for y in 0..map.height {
         for x in 0..map.width {
             if !map.explored[y][x] {
-                let distance = ((robot.x as isize - x as isize).abs() + (robot.y as isize - y as isize).abs()) as isize;
+                let distance = ((robot.x as isize - x as isize).abs()
+                    + (robot.y as isize - y as isize).abs())
+                    as isize;
                 if distance < min_distance {
                     min_distance = distance;
                     target = (x, y);
@@ -137,9 +158,15 @@ fn explore_map(robot: &mut Robot, map: &mut Map) {
 fn collect_resources(robot: &mut Robot, map: &mut Map) {
     match robot.task {
         Task::CollectEnergy => {
-            if let Some(target) = map.energy.iter().min_by_key(|&&(x, y)| {
-                ((robot.x as isize - x as isize).abs() + (robot.y as isize - y as isize).abs()) as isize
-            }).cloned() {
+            if let Some(target) = map
+                .energy
+                .iter()
+                .min_by_key(|&&(x, y)| {
+                    ((robot.x as isize - x as isize).abs() + (robot.y as isize - y as isize).abs())
+                        as isize
+                })
+                .cloned()
+            {
                 if (robot.x, robot.y) == target {
                     robot.energy += 1;
                     map.energy.retain(|&pos| pos != target);
@@ -152,9 +179,15 @@ fn collect_resources(robot: &mut Robot, map: &mut Map) {
             }
         }
         Task::CollectMinerals => {
-            if let Some(target) = map.minerals.iter().min_by_key(|&&(x, y)| {
-                ((robot.x as isize - x as isize).abs() + (robot.y as isize - y as isize).abs()) as isize
-            }).cloned() {
+            if let Some(target) = map
+                .minerals
+                .iter()
+                .min_by_key(|&&(x, y)| {
+                    ((robot.x as isize - x as isize).abs() + (robot.y as isize - y as isize).abs())
+                        as isize
+                })
+                .cloned()
+            {
                 if (robot.x, robot.y) == target {
                     robot.minerals += 1;
                     map.minerals.retain(|&pos| pos != target);
@@ -238,7 +271,7 @@ fn main() {
         }
 
         draw_map(&mut window, &map, &robots);
-        thread::sleep(time::Duration::from_millis(50));
+        thread::sleep(time::Duration::from_millis(10));
     }
 }
 
