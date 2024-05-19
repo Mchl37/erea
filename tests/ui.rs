@@ -18,6 +18,6 @@ mod ui_tests {
 
         // Vérifie que le rendu de l'interface utilisateur est conforme aux attentes
         assert_eq!(rendered_ui.len(), ui_elements.len());
-        // Ajoute d'autres assertions selon les propriétés que vous souhaitez tester
+        
     }
 }
