@@ -10,9 +10,7 @@ mod ui_tests {
         let ui_elements = vec![
             UiElement::new("Button", (100, 100)),
             UiElement::new("TextBox", (200, 200)),
-
         ];
-
 
         let rendered_ui = render_ui(&ui_elements);
 

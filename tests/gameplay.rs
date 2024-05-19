@@ -35,7 +35,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_generate_map() {
         // Vérifie la taille de la carte générée
@@ -86,7 +85,6 @@ mod tests {
         assert_eq!(robot.x, 5);
         assert_eq!(robot.y, 5);
     }
-
 
     #[test]
         fn test_base_appearance() {
@@ -141,7 +139,6 @@ mod tests {
         // Vérifie que le compteur de minéraux du robot est à 0 au début
         assert_eq!(robot.minerals, 0);
 
-
         robot.move_towards((5, 5), &map);
 
         // Vérifie que le robot a collecté le minerai
@@ -154,3 +151,4 @@ mod tests {
         assert_eq!(robot.minerals, 1);
     }
 }
+
