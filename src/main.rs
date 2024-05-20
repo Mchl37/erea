@@ -6,33 +6,34 @@ use std::{thread, time};
 
 // Structure représentant la carte
 struct Map {
-    width: usize,
-    height: usize,
+    width: usize,                  // largeur de la carte
+    height: usize,                 // hauteur de la carte
     obstacles: Vec<Vec<bool>>,     // true si obstacle, false sinon
     energy: Vec<(usize, usize)>,   // positions des sources d'énergie
     minerals: Vec<(usize, usize)>, // positions des gisements de minerais
     base: (usize, usize),          // position de la base
-    explored: Vec<Vec<bool>>,
+    explored: Vec<Vec<bool>>,      // true si la case a été explorée, false sinon
 }
 
 // Structure représentant un robot
 struct Robot {
-    x: usize,
-    y: usize,
-    energy: usize,
-    minerals: usize,
-    task: Task,
-    state: RobotState,
+    x: usize,                      // position x
+    y: usize,                      // position y
+    energy: usize,                 // quantité d'énergie collectée
+    minerals: usize,               // quantité de minerais collectée
+    task: Task,                    // tâche actuelle
+    state: RobotState,             // état actuel
 }
 
-// Enumération des tâches des robots
-#[derive(PartialEq)] // Ajout du dérive pour PartialEq
+// Enumération des tâches possibles pour un robot
+#[derive(PartialEq)]
 enum Task {
     CollectEnergy,
     CollectMinerals,
     Explore,
 }
 
+// Enumération des états possibles pour un robot
 enum RobotState {
     Exploring,
     Returning,
@@ -40,7 +41,7 @@ enum RobotState {
 }
 
 impl Robot {
-    // Fonction pour créer un nouveau robot avec des valeurs initiales
+    // Fonction pour créer un nouveau robot
     fn new(x: usize, y: usize, task: Task) -> Self {
         Robot {
             x,
@@ -52,6 +53,7 @@ impl Robot {
         }
     }
 
+    // Fonction pour déplacer le robot vers une position cible
     fn move_towards(&mut self, target: (usize, usize)) {
         let dx = if self.x < target.0 {
             1
@@ -74,6 +76,7 @@ impl Robot {
     }
 }
 
+// Fonction pour dessiner la carte et les robots
 fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
     let mut buffer: Vec<u32> = vec![0; map.width * map.height];
     for y in 0..map.height {
@@ -124,6 +127,7 @@ fn draw_map(window: &mut Window, map: &Map, robots: &[Robot]) {
         .unwrap();
 }
 
+// Fonction pour explorer la carte
 fn explore_map(robot: &mut Robot, map: &mut Map) {
     let mut target = (robot.x, robot.y);
     let mut min_distance = isize::MAX;
@@ -155,6 +159,7 @@ fn explore_map(robot: &mut Robot, map: &mut Map) {
     robot.move_towards(target);
 }
 
+// Fonction pour collecter des ressources
 fn collect_resources(robot: &mut Robot, map: &mut Map) {
     match robot.task {
         Task::CollectEnergy => {
@@ -203,6 +208,7 @@ fn collect_resources(robot: &mut Robot, map: &mut Map) {
     }
 }
 
+// Fonction pour vérifier si la carte est entièrement explorée
 fn is_map_fully_explored(map: &Map) -> bool {
     for row in &map.explored {
         if row.contains(&false) {
@@ -275,6 +281,7 @@ fn main() {
     }
 }
 
+// Fonction pour générer une carte aléatoire
 fn generate_map(width: usize, height: usize) -> Map {
     let mut map = Map {
         width,
